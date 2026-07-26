@@ -82,6 +82,16 @@ please report no working devices
 
 If the AP is not near it, mode configuration is enabled and web portal is accessible.
 
+The configuration interface is **only** exposed in these cases (never while the honeypot is running on your Wi-Fi):
+
+- **First flash / wiped config** — no valid SSID+password stored yet.
+- **Wi-Fi connection fails** — falls back to the config AP so you can fix credentials.
+- **Explicit configuration mode:**
+  - **Generic ESP32 (WROOM-32):** hold the **BOOT** button (GPIO0) for ~1 second right after reset, **or** send any byte over Serial (115200) during the first ~2 seconds of boot.
+  - **NanoC6 / AtomS3:** hold the on-board button (**BtnA**) during the white-light boot window.
+
+Once the honeypot connects to Wi-Fi, the device runs in **STA-only** mode: the `HoneypotConfig` AP is taken down and the web UI on port 80 is not served, so no configuration surface is exposed to the network.
+
 Note : NanoC6 can be put in configuration mode by olding the button when the white light is ON at boot.
 
 --- 
@@ -146,15 +156,35 @@ All files are automatically created at first boot if missing.
 
 ## 📡 Webhook Format
 
-Example payload (JSON, sent as POST):
+The firmware auto-detects the webhook type from the URL:
 
+- **Gotify** — when the URL contains `/message` (e.g. `https://gotify.example.com/message?token=AbCdEf123`)
+- **Discord** — any other URL (uses the `content` field)
+
+### Gotify payload (JSON, sent as POST)
+
+```json
 {
-  "content": "📡 Honeypot\n🔍 IP: 192.168.1.5\n💻 Command: `cat /etc/passwd`"
+  "title": "📡 Honeypot Alert",
+  "message": "**IP:** 192.168.1.5\n**Port:** 23\n**Command:** cat /etc/passwd",
+  "priority": 5,
+  "extras": { "client::display": { "contentType": "text/markdown" } }
 }
+```
 
-You can route this to:
+The `extras.client::display.contentType = text/markdown` field tells the Gotify
+web UI and Android app to render the message as Markdown, so the bold labels
+above display nicely. Set the **Webhook URL** in the config UI to your full
+Gotify URL **including** `/message?token=<APP_TOKEN>`.
 
-- Discord (via Webhook URL)
+### Discord payload (fallback)
+
+```json
+{ "content": "📡 **Honeypot**\n🔍 IP: 192.168.1.5\n💻 Command: `cat /etc/passwd`" }
+```
+
+You can also route this to:
+
 - Telegram (via Bot API Gateway)
 - Signal (via relay server or bridge)
 - WhatsApp (via Business API)

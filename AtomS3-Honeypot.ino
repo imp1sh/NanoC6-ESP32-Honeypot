@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
+#include <WiFiClientSecure.h>
 #include <SPIFFS.h>
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
@@ -8,10 +9,45 @@
 #include <algorithm>
 #include <vector>
 
-String ssid, password, WebhookURL;
+String ssid, password, WebhookURL, hostname;
 const char* configPath = "/config.json";
 const char* logPath = "/honeypot_logs.txt";
 const char* indexPath = "/index.html";
+
+// ISRG Root X1 — Let's Encrypt root CA. Validates HTTPS webhooks without
+// disabling cert verification. Source: https://letsencrypt.org/certs/isrgrootx1.pem
+const char ISRG_ROOT_X1[] PROGMEM =
+  "-----BEGIN CERTIFICATE-----\n"
+  "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\n"
+  "-----END CERTIFICATE-----\n";
 
 WiFiServer ftpServer(21);
 WiFiServer sshServer(22);
@@ -30,16 +66,20 @@ WiFiServer ahttpServer(8080);
 std::vector<uint16_t> enabledPorts;
 AsyncWebServer webServer(80);
 
+void writeFile(const char* path, const char* content) {
+  File f = SPIFFS.open(path, FILE_WRITE);
+  if (f) {
+    f.print(content);
+    f.close();
+    Serial.println(String("[+] Write : ") + path);
+  } else {
+    Serial.println(String("[!] Fail to write : ") + path);
+  }
+}
+
 void createFileIfMissing(const char* path, const char* content) {
   if (!SPIFFS.exists(path)) {
-    File f = SPIFFS.open(path, FILE_WRITE);
-    if (f) {
-      f.print(content);
-      f.close();
-      Serial.println(String("[+] Create : ") + path);
-    } else {
-      Serial.println(String("[!] Fail to create : ") + path);
-    }
+    writeFile(path, content);
   }
 }
 
@@ -50,9 +90,11 @@ void initSPIFFS() {
   }
 
   // Création automatique des fichiers de base
-  createFileIfMissing(configPath, "{\"ssid\":\"\",\"password\":\"\",\"webhook\":\"\",\"ports\":[21,22,23,25,53,110,143,443,445,3306,3389,5900,8080]}");
+  createFileIfMissing(configPath, "{\"ssid\":\"\",\"password\":\"\",\"hostname\":\"\",\"webhook\":\"\",\"ports\":[21,22,23,25,53,110,143,443,445,3306,3389,5900,8080]}");
   createFileIfMissing(logPath, "");
-  createFileIfMissing(indexPath,
+  // Always refresh the web UI so a firmware update with new fields
+  // (e.g. hostname) replaces any stale index.html left in SPIFFS.
+  writeFile(indexPath,
   "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Honeypot Config</title>"
   "<style>"
   "body{font-family:sans-serif;background:#f4f4f4;padding:20px;margin:0;}"
@@ -74,6 +116,7 @@ void initSPIFFS() {
   "<form id='form'>"
   "<label>Wi-Fi SSID</label><input name='ssid' required>"
   "<label>Wi-Fi Password</label><input name='password' type='password' required>"
+  "<label>DHCP Hostname</label><input name='hostname' placeholder='esp32-honeypot'>"
   "<label>Webhook URL</label><input name='webhook'>"
   "<label>Ports to enable</label>"
   "<div style='max-height:200px;overflow:auto;border:1px solid #ccc;padding:10px;border-radius:5px;'>"
@@ -146,6 +189,8 @@ bool loadConfig() {
 
   ssid = doc["ssid"].as<String>();
   password = doc["password"].as<String>();
+  hostname = doc["hostname"].isNull() ? String("") : doc["hostname"].as<String>();
+  if (hostname == "null") hostname = "";
   WebhookURL = doc["webhook"].as<String>();
 
   enabledPorts.clear();
@@ -162,7 +207,7 @@ bool loadConfig() {
 }
 
 void setupWebUI() {
-  webServer.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+  webServer.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html").setCacheControl("no-store");
 
   // --- GET /config : return JSON config file ---
   webServer.on("/config", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -223,6 +268,12 @@ void setupWebUI() {
     delay(500);
   });
 
+  // AP-only mode: tear down any STA association so the configuration
+  // interface is reachable solely on the "HoneypotConfig" AP and never
+  // on the targeted Wi-Fi (critical for a honeypot).
+  WiFi.disconnect(true, false);
+  WiFi.mode(WIFI_AP);
+
   // Enable AP mode for initial setup
   WiFi.softAP("HoneypotConfig", "HoneyPotConfig123");
   Serial.println("[*] Configuration Mode Enabled");
@@ -282,15 +333,42 @@ void logCommand(String ip, uint16_t port, String command) {
 
   if (WiFi.status() == WL_CONNECTED && WebhookURL.length() > 0) {
     HTTPClient http;
-    http.begin(WebhookURL);
+    bool isHttps = WebhookURL.startsWith("https://");
+    WiFiClientSecure sec;
+    if (isHttps) {
+      sec.setCACert(ISRG_ROOT_X1);  // validate against Let's Encrypt root (ISRG Root X1)
+      http.begin(sec, WebhookURL);
+    } else {
+      http.begin(WebhookURL);
+    }
     http.addHeader("Content-Type", "application/json");
 
-    String msg = "{\"content\":\"📡 **Honeypot**\\n🔍 IP: " + ip +
-                 "\\n📌 Port: " + String(port) +
-                 "\\n💻 Command: " + escapeJSON(command) +
-                 "\\n__________________________\"}";
+    String escapedCmd = escapeJSON(command);
+    String msg;
+    if (WebhookURL.indexOf("/message") >= 0) {
+      // Gotify webhook → https://<host>/message?token=<APP_TOKEN>
+      // Rendered as Markdown by Gotify thanks to the extras.client::display block.
+      String body = "**IP:** " + ip +
+                    "\\n**Port:** " + String(port) +
+                    "\\n**Command:** " + escapedCmd;
+      msg = "{\"title\":\"📡 Honeypot Alert\","
+            "\"message\":\"" + body + "\","
+            "\"priority\":5,"
+            "\"extras\":{\"client::display\":{\"contentType\":\"text/markdown\"}}}";
+    } else {
+      // Discord-style webhook fallback
+      msg = "{\"content\":\"📡 **Honeypot**\\n🔍 IP: " + ip +
+            "\\n📌 Port: " + String(port) +
+            "\\n💻 Command: " + escapedCmd +
+            "\\n__________________________\"}";
+    }
 
-    http.POST(msg);
+    int code = http.POST(msg);
+    if (code > 0) {
+      Serial.println("[webhook] HTTP " + String(code) + (code >= 200 && code < 300 ? " OK" : " (non-2xx)"));
+    } else {
+      Serial.println("[webhook] FAILED: " + http.errorToString(code) + " (" + String(code) + ")");
+    }
     http.end();
   }
 }
@@ -1104,28 +1182,65 @@ void setup() {
 
   initSPIFFS();
 
+  M5.update();
+  if (M5.BtnA.isPressed()) {
+    Serial.println("Boot: BtnA held → WebUI mode");
+    setupWebUI();
+    return;
+  }
+
   if (!loadConfig()) {
     setupWebUI();
     return;
   }
 
+  WiFi.mode(WIFI_STA);
+  WiFi.enableIPv6(true);  // SLAAC autoconf: request IPv6 on the STA interface
+  if (hostname.length() > 0) {
+    WiFi.setHostname(hostname.c_str());
+    Serial.println("[+] DHCP hostname: " + hostname);
+  } else {
+    WiFi.setHostname("esp32-honeypot");
+  }
   WiFi.begin(ssid.c_str(), password.c_str());
   Serial.print("[~] Connecting to " + ssid + " ");
   M5.Lcd.print("[~] Connecting to " + ssid + " ");
   int retry = 0;
-  while (WiFi.status() != WL_CONNECTED && retry++ < 30) {
+  while (WiFi.status() != WL_CONNECTED && retry++ < 60) {
     delay(500); Serial.print(".");
       M5.Lcd.println(".");
 
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\n[!] Wi-Fi échec");
+    Serial.println("\n[!] Wi-Fi échec — entering configuration mode");
     setupWebUI();
     return;
   }
 
   Serial.println("\n[+] IP : " + WiFi.localIP().toString());
+
+  // Wait for SLAAC autoconf to assign a global IPv6 address (RA from the router).
+  Serial.print(F("[~] Waiting for IPv6 (SLAAC)... "));
+  unsigned long t6 = millis();
+  IPAddress g6;
+  while (millis() - t6 < 10000) {
+    g6 = WiFi.globalIPv6();
+    if ((g6[0] & 0xE0) == 0x20) break;
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+  IPAddress ll6 = WiFi.linkLocalIPv6();
+  if ((g6[0] & 0xE0) == 0x20) {
+    Serial.println("[+] IPv6 global : " + g6.toString());
+  } else {
+    Serial.println(F("[!] No global IPv6 via SLAAC (router RA missing?) — link-local only"));
+  }
+  if (ll6.toString() != "0.0.0.0" && ll6.toString() != "::") {
+    Serial.println("[+] IPv6 link-local: " + ll6.toString());
+  }
+
   M5.Lcd.clear();
   M5.Lcd.setCursor(0, 0);
   M5.Lcd.println("Honeypot Running...");
