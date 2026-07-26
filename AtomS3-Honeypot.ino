@@ -1194,14 +1194,15 @@ void setup() {
     return;
   }
 
+  // setHostname must be called BEFORE WiFi.mode(WIFI_STA): in this core
+  // WiFi.mode() applies NetworkManager::getHostname() to the STA netif,
+  // so the custom name must already be in the buffer when that runs.
+  const char* hn = (hostname.length() > 0) ? hostname.c_str() : "esp32-honeypot";
+  WiFi.setHostname(hn);
+  Serial.println("[+] DHCP hostname: " + String(hn));
+
   WiFi.mode(WIFI_STA);
   WiFi.enableIPv6(true);  // SLAAC autoconf: request IPv6 on the STA interface
-  if (hostname.length() > 0) {
-    WiFi.setHostname(hostname.c_str());
-    Serial.println("[+] DHCP hostname: " + hostname);
-  } else {
-    WiFi.setHostname("esp32-honeypot");
-  }
   WiFi.begin(ssid.c_str(), password.c_str());
   Serial.print("[~] Connecting to " + ssid + " ");
   M5.Lcd.print("[~] Connecting to " + ssid + " ");
